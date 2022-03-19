@@ -99,6 +99,10 @@
     * Try-блоки уровня функций
     * Гарантии безопасности
     * Линия Калба
+- Лекция 15
+    * Гетерогенные системы
+    * OpenCL
+    * Вычисления OpenCL
 
 ## Лекция 3 ##
 
@@ -1786,3 +1790,95 @@ public:
     }
 }
 ```
+
+## Лекция 15
+
+### Гетерогенные системы
+Гетерогенные системы - такие системы, в которых есть две выделенные роли при вычислениях. Например в OpenCL есть разделение на host и device. Host выполняет планировку, а основные вычисление проводятся на device. Device объединяются в платформы, с которыми работает OpenCL.
+
+## OpenCL
+Взаимодействие OpenCL с платформами:
+
+![Картинку украли цыгане](./images/pVEgekiVqBY.jpg)
+
+Контекст владеет девайсами. Для хранения запросов к девайсу используются очереди.
+
+Чтобы избежать работы с С api используется С++ обертка:
+
+```cpp
+#include <iostream>
+#include <stdexcept>
+#include <vector>
+
+#ifndef CL_HPP_TARGET_OPENCL_VERSION
+#define CL_HPP_MINIMUM_OPENCL_VERSION 120
+#define CL_HPP_TARGET_OPENCL_VERSION 120
+#endif
+
+#define CL_HPP_ENABLE_EXCEPTIONS
+
+#include "CL/opencl.hpp"
+
+namespace {
+
+// first platform with some GPUs...
+cl::Platform select_platform() {
+  cl::vector<cl::Platform> platforms;
+  cl::Platform::get(&platforms);
+  for (auto p : platforms) {
+    // note: usage of p() for plain id
+    cl_uint numdevices = 0;
+    ::clGetDeviceIDs(p(), CL_DEVICE_TYPE_GPU, 0, NULL, &numdevices);
+    if (numdevices > 0)
+      return cl::Platform(p); // retain?
+  }
+  throw std::runtime_error("No platform selected");
+}
+
+enum { BUFSZ = 128 };
+
+} // namespace
+
+int main() try {
+  cl::Platform P = select_platform();
+  cl::string name = P.getInfo<CL_PLATFORM_NAME>();
+  cl::string profile = P.getInfo<CL_PLATFORM_PROFILE>();
+  std::cout << "Selected: " << name << ": " << profile << std::endl;
+
+  cl_context_properties properties[] = {
+      CL_CONTEXT_PLATFORM, reinterpret_cast<cl_context_properties>(P()),
+      0 // signals end of property list
+  };
+
+  cl::Context C(CL_DEVICE_TYPE_GPU, properties);
+  cl::CommandQueue Q(C);
+
+  cl::vector<int> A(BUFSZ), B(BUFSZ);
+  for (int i = 0; i < BUFSZ; ++i)
+    A[i] = i * i;
+
+  cl::Buffer D(C, CL_MEM_READ_WRITE, BUFSZ * sizeof(int));
+
+  cl::copy(Q, A.begin(), A.end(), D);
+  cl::copy(Q, D, B.begin(), B.end());
+
+  for (int i = 0; i < BUFSZ; ++i) {
+    if (B[i] != i * i) {
+      std::cout << "Error at: " << i << ": " << B[i] << " != " << i * i
+                << std::endl;
+      return -1;
+    }
+  }
+
+  std::cout << "Checks passed" << std::endl;
+} catch (cl::Error err) {
+  std::cerr << "ERROR " << err.err() << ":" << err.what() << std::endl;
+  return -1;
+}
+```
+
+### Вычисления OpenCL
+
+В OpenCL устройства исполняют программы, которые называются ядрами(kernals). В vulcan такие программы называются шейдерами. 
+
+![Картинку украли цыгане](./images/sJ4Rd1Qsu2M.jpg)
