@@ -103,6 +103,13 @@
     * Гетерогенные системы
     * OpenCL
     * Вычисления OpenCL
+- Лекция 16 
+    * OpenCL API
+    * Специализация шаблонов
+    * Type traits
+    * Инстанцирование
+    * Частная специализация
+    * Разрешение имен
 
 ## Лекция 3 ##
 
@@ -1882,3 +1889,179 @@ int main() try {
 В OpenCL устройства исполняют программы, которые называются ядрами(kernals). В vulcan такие программы называются шейдерами. 
 
 ![Картинку украли цыгане](./images/sJ4Rd1Qsu2M.jpg)
+
+
+## Лекция 16
+
+### OpenCL API
+Почти любая сущность OpenCL API является ref-counted и имеетдва специальных метода retain и release. Первый увеличивает количество ссылок на объект, второй уменьшает. Когда количество ссылок дошло до нуля объект уничтожается. Для реализации С++ обертки необходима специализация шаблонов. 
+
+### Специализация шаблонов
+Чтобы компилятор не генерировал метод для определенного типа, а испоьзовал пользовательский, необходимо его специализировать:
+
+```cpp
+template <typename T> struct S{
+
+    void dump(){ std::cout << "for all" << std::endl; }
+};
+
+tempalte <> struct S<int>{
+
+    void dump(){ std::cout << "for int" << std::endl; }
+};
+```
+
+Для OpenCL API общий случай не нужен, а каждый необходимый тип специализируется пользователем, чтобы при попытке вызова функции от другого:
+
+```cpp
+template <typename T>
+struct ReferenceHandler{ };
+
+template<>
+struct ReferenceHandler<cl_mem>{
+
+    static cl_int retain(cl_mem memory){
+
+        return ::clRetainMemObject(memory);
+    }
+
+    static cl_int release(cl_mem memory){
+
+        return ::clReleaseMemObject(memory);
+    }
+};
+
+template <typename cl_type>
+class Wrapper{
+
+protected:
+
+    cl_type obj_;
+public:
+    Wrapper (cl_type obj = NULL): obj_{obj} {}
+    ~Wrapper(){
+
+        if (obj_) release();
+    }
+
+    cl_type& operator ()(){ return obj_; }
+
+    cl_int release() const; //делегирует к ReferenceHandler
+};
+```
+
+Теперь ReferenceHandler<X>::release(memory) это либо X либо ошибка.
+
+В программе нельзя использовать этот Wrapper(поэтому он лежит в detail), тк можно присвоить два объекта через круглые скобки, тем самым поломав количество ссылок. От этого класса можно насследоваться:
+
+```cpp
+class Device: public detail::Wrapper<cl_devise_id>{
+
+    Device(const Device& dev): detail::Wrapper(dev){}
+
+    template <cl_device_info name> //это не типы а парметры
+    typename param_traits<cl_device_info, name>::type get_info(cl_int* err = NULL){
+        //вызываем get_info от cl_device_info
+    }//это перегрузка метода по возвращаемому значению
+};
+```
+
+### Type traits
+В прошлом примере возвращается шаблонный тип, который параметризован только необходимыми типами. Его общее тело пустое, чтобы выдавать ошибку на незнакомые типы:
+
+```cpp
+template <typename T, cl_int Name>
+struct param_traits{};
+
+template<> struct param_traits<cl_platform_info, CL_PLATFORM_NAME>{
+
+    enum{ value = CL_PLATFORM_NAME; } //теперь когда мы возвращаем этот класс мы знаем что за тип девайса 
+    using type = std::string;         //если get_info() будет вызван от неизвестного типа, то будет ошибка компиляции
+}
+```
+
+### Инстанцирование 
+Инстанцирование - процесс порождения специализаций. Помимо порождения специализаций пользователем компилятор неявно с помощью подстановки создает только необходимые специализации шаблонного класса.
+
+При создании экземпляров важно пространчтвеннное отношение. Специализация должна быть после шаблона, но до использования. Если инстанцировать шаблон после использования, то будет double definition, тк компилятор уже создал нужную функцию. 
+
+Можно удалять специализации:
+
+```cpp
+template <typename T>
+void foo(T*);
+
+template <> void foo<char>(char*) = delete; //полная специализация 
+void foo(char*) = delete; //запрещаем перегрузку
+
+template <typename T, int N>
+struct Tricky{
+
+    buf[N - 2]; //не во всех случаях ошибка
+};
+
+template struct Tricky<int, 1>; //запрос на явное инстанцирование
+```
+
+Неявное инстанцирование шаблонов - ленивый процесс(инстанцируется только при необходимости). Еще одним примером ленивого поведения С++ является вычисление логических выражений. В остальных случаях поведение энергичное.
+
+### Частная специализация
+Только для классов возможно определить в специализации не все параметры:
+
+```cpp
+template <typename T, typename U>
+class Foo {};
+
+template <typenaame T>
+class Foo <T, T> {};
+
+template <typename T, typename U>
+class Foo<T*, U*> {};
+
+template <typename T>
+struct X;
+
+template <typename T>
+struct X<std::vector<T>>; //частичная специализация 
+
+template <typename R, typename T>
+struct Y;
+
+template <typename R, typename T>
+struct Y<R(T)>; //ппараметризовали функцией, которая принимает Т и аозвращает R
+```
+
+![Картинку украли цыгане](./images/AW8jLGxf8wI%20(1).jpg)
+
+### Разрешение имен
+В шаблонах могут быть места, которые всегда неправильные(например неправильное количестово скобок), и места, которые могут стать правильными при некоторых парметрах T. Поэтому в шаблонах проводится двухфазное разрешение имен:
+
+1. До инстанцирования. Шаблоны проходят общую синтаксическую проверку, а также разрешаются независимые имена.
+2. Во время инстанцирования. Проводится срециальгая синтаксическая проверка и разрешаются зависимые имена.
+
+```cpp
+template <typename T>
+struct Foo{
+
+    int use(){ return T::illegal_name; }//пимер зависимого имени(это поле можт быть в типе Т, а может и не быть)
+}
+```
+
+Разрешение зависимых имен откладывается до подмтановки шаблнного параметра.
+
+```cpp
+template <typename T> 
+struct Base{
+    void exit();
+};
+
+template <typename T>
+struct Derived: Base<T>{
+
+    void foo(){
+        
+        exit(); //это НЕ зависимое имя, поэтому будет подставлен exit() из стандартной библиотеки
+        this->exit(); //теперь зависимое
+    }
+};
+```
