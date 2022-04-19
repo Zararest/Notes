@@ -134,6 +134,14 @@
     * Неуниверсальные ссылки
     * for auto&&
     * Идиома AAARR
+- Лекция 19
+    * Вариадельные шаблоны
+    * Паттерны раскрытия
+    * Прозрачная оболочка
+    * Специализация методов
+    * void_t
+    * declval
+    * Конструирование из двух итераторов
 - Лекция 21
     * LLVM IR
     * SSA представление
@@ -2358,6 +2366,156 @@ auto&& c = Customer{"Jim", 42};
 const int& foo();
 auto&& f = foo(); //ok -> const int&
 ```
+
+
+
+## Лекция 19
+
+### Вариабельные шаблоны
+Чтобы передать в функцию произвольное количество параметров, необходим осделать вариабельный шаблон:
+
+```cpp
+template<typename ... Args>
+void f(Args ... args); //сбда подается столько же параметров сколько и в шаблон благодаря Args
+```
+
+Для нахождения размеров пачек парметров используются:
+
+```cpp
+sizeof...(Args); //применили к типу пачки
+sizeof...(args); //применили к самой пачке
+```
+
+### Паттерны раскрытия 
+```cpp
+template<typename .. Types> 
+void f(Types ...args);
+
+template<typename .. Types> 
+void g(Types ...args){
+
+    f(args ...);    // f(x, y)
+    f(&args ...);   // f(&x, &y)
+    g(h(args) ...); // f(h(x), h(y))
+}
+```
+
+### Прозрачная оболочка
+```cpp
+template<typename Fun, tepename Arg>
+decltype(auto) transperent(Fun fun, Arg&& arg){
+
+    return fun(std::forward<Arg>(arg));
+}
+```
+
+Эта функция просто передает параметр в функцию с сохранением типов.
+
+Для произвольного количества аргументов:
+```cpp
+template<typename Fun, typename ... Args>
+decltype(auto) transparent(Fun&& fun, Args&&.. args){
+
+    return std::froward<Fun>(fun) (std::forward<Args>(args)...); //std::forward необходим для аннотированных функций(мы вызываем std::forward для анноированного класса с перегруженными ())
+}
+```
+
+Реализация empalace вне тела класса:
+```cpp
+template<typename T>
+class Stack{
+
+public:
+
+    template<typename U> 
+    void emplace(U&& ... args){} //в классе
+
+    template<typename ... Args>
+    void emplace(Args&& ... args);
+};
+
+template<typename T> //тк класс шаблонный
+template<typename.. Args> //тк метод шаблонный
+void Stack<T>::emplace(Args&&... args){
+
+    top_ = new StackElem(top_, std::forward<Args>(args)...); //применяем форвард к каждомк элементу
+} 
+```
+
+### Специализация методов
+Частичные специализации для функций запрещены, поэтому при оперделении специализации шаблонного метода класса необходимо определить специализацию для класса:
+
+```cpp
+template<typename T>
+struct Foo{
+
+    template<typename U>
+    void foo(){}
+};
+
+template<>   //пустые скобки надо указывать,чтобы показать, что это специализация
+template<>
+void Foo<int>::foo<int>(){}
+```
+
+Наличие паблик шаблонного метода отменяет инкапсуляцию.
+
+### void_t
+```cpp
+template<typename...> //если все аргументы этого шаблона легальны, то возвращается void. Если хотя бы один тип не легален, то не void
+using void_t = void;
+```
+
+Это логическле И для аргументов шаблона.
+
+Пример использования:
+
+```cpp
+template<typename, typename = void>
+struct has_typedef_foobar: std::false_type{}; //в общем случае наследуется от false_type
+
+template<typename T>
+struct has_typedef_foobar<T, std::void_t<typename T::foobar>>: std::true_type{};
+//в этом случае если с помощью typedef определен тип foobar(который лежит в T), void_t возвращает void и специализация засчитывается и наследование идет от true_type
+
+struct Foo{ typedef float foobar; };
+struct Bar{};
+
+std::cout << has_typedef_foobar<Foo>{} << std::endl; //выведет true
+```
+
+В классе `true_type` есть оператор приведения к bool, поэтому все его наследники тоже могут к нему приводиться.
+
+### declval
+Чтобы вывести тип не имея объекта класса(необходимо, когда у него нету конструктора п оумолчанию) используется тот факт, что `decltype` не вычисляет, а только оценивает выражение:
+
+```cpp
+template<typename T>
+add_rvalue_reference<T> declval(); //объявление функции, которая как бы возвращает rvalue ref
+
+template <typename T>
+struct Tricky{
+
+    Tricky() = delete;
+    const volatile T foo();
+};
+
+decltype(declval<Tricky<int>>().foo()) t; 
+```
+
+Мы показали, что хотим вызвать эту функцию от rvalue объекта, потому что это не требует конструктора, и посмотреть возвращаемое значение.
+
+Возвращается правая ссылка, потому что некоторые функции могут быть `&&` аннотированными. (с правой ссылки мы можем вызвать функции с обеими аннотациями)
+
+### Конструирование из двух итераторов
+```cpp
+template <typename Iter,
+          typename = void_t<decltype(*std::declval<Iter&>()), //запрос на наличие разыменования
+          decltype(++std::declval<Iter&>())>                  //запрос на наличие ++
+MyVector(Iter fst, Iter lst);
+```
+
+Оба условия находятся в `void_t`, поэтому если одно из них не выполнится, то произойдет провал подстановки в void_t.
 
 
 ## Лекция 21
