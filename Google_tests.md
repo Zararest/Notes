@@ -141,3 +141,49 @@ TEST_F(QueueTest, DequeueWorks) {
   delete n;
 }
 ```
+
+# Сборка через Cmake
+Чтобы подколючить GoogleTests к проекту надо прописать:
+
+    cmake_minimum_required(VERSION 3.14)
+    project(my_project)
+
+    # GoogleTest requires at least C++14
+    set(CMAKE_CXX_STANDARD 14)
+
+    include(FetchContent)
+    FetchContent_Declare(
+      googletest
+      GIT_REPOSITORY https://github.com/google/googletest.git
+      GIT_TAG release-1.12.1
+    )
+
+Пример кода тестов:
+
+```cpp
+#include <gtest/gtest.h>
+
+// Demonstrate some basic assertions.
+TEST(HelloTest, BasicAssertions) {
+  // Expect two strings not to be equal.
+  EXPECT_STRNE("hello", "world");
+  // Expect equality.
+  EXPECT_EQ(7 * 6, 42);
+}
+```
+
+Создание целей для тестов в CmakeLists:
+
+    enable_testing()
+
+    add_executable(
+      hello_test
+      hello_test.cc
+    )
+    target_link_libraries(
+      hello_test
+      GTest::gtest_main #тут надо просто написать gtest_main
+    )
+
+    include(GoogleTest)
+    gtest_discover_tests(hello_test)
